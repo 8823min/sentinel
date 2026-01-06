@@ -1,0 +1,30 @@
+{
+  "name": "sentinel",
+  "version": "1.0.0",
+  "description": "sentinel bot",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "study",
+    "management"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^9.2.2",
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.3.1",
+    "node-cron": "^3.0.3",
+    "package.json": "^2.0.1",
+    "prompts": "^2.4.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

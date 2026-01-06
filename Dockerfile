@@ -14,4 +14,4 @@ RUN npm install
 EXPOSE 8000
 
 # アプリの起動、コマンドを指定しよう。index.jsなら"node", "index.js"
-CMD ["node", "main.mjs"]
+CMD ["node", "src/index.js"]

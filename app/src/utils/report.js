@@ -101,51 +101,57 @@ export async function generateDailyReport(client) {
         // 要件的には「無いなら送信しない」でも良いが、テスト中は送信されると分かりやすい
     }
 
-    // 全ギルドの適切なチャンネルに送信
-    for (const guild of client.guilds.cache.values()) {
-        // 1. 「勉強」チャンネルを探す
-        // 2. なければホワイトリストに入っているチャンネルの最初の1つ
-        // 3. なければ権限のある最初のテキストチャンネル
-        let channel = guild.channels.cache.find(c => c.name === ALLOWED_CHANNEL_NAMES[0] && c.type === 0);
+    // 指定されたギルドのみに送信
+    const TARGET_GUILD_ID = '989882412660047942';
+    const guild = client.guilds.cache.get(TARGET_GUILD_ID);
 
-        if (!channel) {
-            channel = guild.channels.cache.find(c => c.type === 0 && c.permissionsFor(guild.members.me).has('SendMessages'));
-        }
+    if (!guild) {
+        console.warn(`⚠️ ターゲットギルド (${TARGET_GUILD_ID}) が見つかりませんでした。Botが参加しているか確認してください。`);
+        return;
+    }
 
-        if (channel) {
-            try {
-                // 日次レポートEmbed
-                if (reportFields.length > 0) {
-                    const reportEmbed = createInfoEmbed(
-                        `📊 日次活動レポート (${targetDateStr})`,
-                        '制限中ユーザーの投稿数集計結果です。'
-                    );
-                    reportEmbed.addFields(reportFields);
-                    await channel.send({ embeds: [reportEmbed] });
-                } else if (userCount === 0 && activeUsers.length > 0) {
-                    // 全員活動ゼロの場合の通知（任意）
-                    const emptyEmbed = createInfoEmbed(
-                        `📊 日次活動レポート (${targetDateStr})`,
-                        '対象ユーザーの昨日の活動はありませんでした。素晴らしい集中力です！'
-                    );
-                    await channel.send({ embeds: [emptyEmbed] });
-                }
+    // 1. 「勉強」チャンネルを探す
+    // 2. なければホワイトリストに入っているチャンネルの最初の1つ
+    // 3. なければ権限のある最初のテキストチャンネル
+    let channel = guild.channels.cache.find(c => c.name === ALLOWED_CHANNEL_NAMES[0] && c.type === 0);
 
-                // 警告Embed
-                if (warningFields.length > 0) {
-                    const warningEmbed = createWarningEmbed(
-                        '⚠️ 活動量増加の警告',
-                        '以下のユーザーは前日に比べて投稿数が増加しています。'
-                    );
-                    warningEmbed.addFields(warningFields);
-                    await channel.send({ embeds: [warningEmbed] });
-                }
-                console.log(`✅ [${guild.name}] にレポートを送信しました: #${channel.name}`);
-            } catch (error) {
-                console.error(`❌ [${guild.name}] へのレポート送信に失敗しました:`, error);
+    if (!channel) {
+        channel = guild.channels.cache.find(c => c.type === 0 && c.permissionsFor(guild.members.me).has('SendMessages'));
+    }
+
+    if (channel) {
+        try {
+            // 日次レポートEmbed
+            if (reportFields.length > 0) {
+                const reportEmbed = createInfoEmbed(
+                    `📊 日次活動レポート (${targetDateStr})`,
+                    '制限中ユーザーの投稿数集計結果です。'
+                );
+                reportEmbed.addFields(reportFields);
+                await channel.send({ embeds: [reportEmbed] });
+            } else if (userCount === 0 && activeUsers.length > 0) {
+                // 全員活動ゼロの場合の通知
+                const emptyEmbed = createInfoEmbed(
+                    `📊 日次活動レポート (${targetDateStr})`,
+                    '対象ユーザーの昨日の活動はありませんでした。素晴らしい集中力です！'
+                );
+                await channel.send({ embeds: [emptyEmbed] });
             }
-        } else {
-            console.warn(`⚠️ [${guild.name}] 送信先のチャンネルが見つかりませんでした。`);
+
+            // 警告Embed
+            if (warningFields.length > 0) {
+                const warningEmbed = createWarningEmbed(
+                    '⚠️ 活動量増加の警告',
+                    '以下のユーザーは前日に比べて投稿数が増加しています。'
+                );
+                warningEmbed.addFields(warningFields);
+                await channel.send({ embeds: [warningEmbed] });
+            }
+            console.log(`✅ [${guild.name}] にレポートを送信しました: #${channel.name}`);
+        } catch (error) {
+            console.error(`❌ [${guild.name}] へのレポート送信に失敗しました:`, error);
         }
+    } else {
+        console.warn(`⚠️ [${guild.name}] 送信先のチャンネルが見つかりませんでした。`);
     }
 }

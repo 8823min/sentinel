@@ -25,8 +25,11 @@ async function execute(interaction) {
   try {
     // アクティブな制限をチェック
     const restriction = getActiveRestriction(userId);
+    const member = await guild.members.fetch(userId);
+    const roleName = getPersonalRoleName(member.user);
+    const personalRole = guild.roles.cache.find(r => r.name === roleName);
 
-    if (!restriction) {
+    if (!restriction && !member.roles.cache.has(personalRole?.id)) {
       const embed = createInfoEmbed(
         '制限なし',
         '現在、アクティブな制限はありません。'
@@ -35,22 +38,17 @@ async function execute(interaction) {
       return;
     }
 
-    // 制限を解除（データベース）
-    stopRestriction(userId);
+    // 制限を解除（データベースが存在する場合のみ）
+    if (restriction) {
+      stopRestriction(userId);
+    }
 
-    // ユーザーからロールを剥奪
-    const member = await guild.members.fetch(userId);
-
-    // 個人ロールを取得
-    const roleName = getPersonalRoleName(member.user);
-    const personalRole = guild.roles.cache.find(r => r.name === roleName);
-
-    if (personalRole) {
+    if (personalRole && member.roles.cache.has(personalRole.id)) {
       // 全チャンネルから制限を解除
       await removeRestrictionsFromAllChannels(guild, personalRole);
 
       // ロール復元
-      if (restriction.original_roles) {
+      if (restriction && restriction.original_roles) {
         try {
           const originalRoleIds = JSON.parse(restriction.original_roles);
           const botMember = guild.members.me;
@@ -70,7 +68,8 @@ async function execute(interaction) {
           await member.roles.remove(personalRole, 'Sentinel: 制限解除（復元失敗のため削除のみ）');
         }
       } else {
-        await member.roles.remove(personalRole, 'Sentinel: 制限解除');
+        // DBに記録がない場合、または復元情報がない場合は単純にロールを剥奪
+        await member.roles.remove(personalRole, 'Sentinel: 制限解除 (DB記録なし/復元情報なし)');
       }
     }
 

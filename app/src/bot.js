@@ -74,6 +74,10 @@ export class SentinelBot {
                     await clear.execute(interaction);
                 } else if (subcommand === 'whitelist') {
                     await whitelist.execute(interaction);
+                } else if (subcommand === 'report_trigger') {
+                    await interaction.reply({ content: '📊 日次レポートの強制実行を開始します...', flags: MessageFlags.Ephemeral });
+                    await generateDailyReport(this.client);
+                    await interaction.followUp({ content: '✅ 日次レポートの実行が完了しました。ログを確認してください。', flags: MessageFlags.Ephemeral });
                 }
             } catch (error) {
                 console.error('コマンド実行エラー:', error);
@@ -170,6 +174,7 @@ export class SentinelBot {
                     { name: 'stop', description: '制限を解除', type: 1 },
                     { name: 'status', description: '現在の状態', type: 1 },
                     { name: 'clear', description: 'データを消去', type: 1 },
+                    { name: 'report_trigger', description: '【管理者用】日次レポートを強制的に実行します', type: 1 },
                 ],
             };
 

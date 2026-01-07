@@ -45,6 +45,10 @@ DISCORD_TOKEN=your_bot_token_here
 # データベース設定
 DATABASE_PATH=./data/sentinel.db
 
+# ヘルスチェックサーバー設定（オプション、デフォルト: 8000）
+# Koyebなどのクラウドプラットフォームでは自動的にPORTが設定されます
+PORT=8000
+
 # タイムゾーン設定（オプション、デフォルト: Asia/Tokyo）
 TZ=Asia/Tokyo
 ```
@@ -64,6 +68,31 @@ npm start
 
 ```bash
 npm run dev
+```
+
+### 4. ヘルスチェックエンドポイント
+
+Botが起動すると、ヘルスチェック用のHTTPサーバーも自動的に起動します（デフォルト: ポート8000）。
+
+利用可能なエンドポイント：
+
+- **`GET /health`** - ヘルスチェック（Koyeb等のプラットフォーム用）
+  - Bot稼働中: `200 OK`
+  - Bot未起動: `503 Service Unavailable`
+
+- **`GET /status`** - 詳細ステータス
+  - Bot情報、接続サーバー数、メモリ使用量、WebSocket Ping等
+
+- **`GET /ping`** - シンプルなPing応答
+  - 常に `200 OK` を返す
+
+例：
+```bash
+# ヘルスチェック
+curl http://localhost:8000/health
+
+# 詳細ステータス
+curl http://localhost:8000/status
 ```
 
 ## プロジェクト構造
@@ -104,6 +133,44 @@ SQLiteを使用してデータを永続化します。以下のテーブルが�
 ## 要件定義
 
 詳細な要件定義は `設計要件.md` を参照してください。
+
+## Koyebへのデプロイ
+
+Koyebにデプロイする際の設定：
+
+### 1. 環境変数の設定
+
+Koyebのダッシュボードで以下の環境変数を設定してください：
+
+```
+DISCORD_TOKEN=your_bot_token_here
+DISCORD_CLIENT_ID=your_client_id_here
+DISCORD_GUILD_ID=your_guild_id_here (オプション)
+DATABASE_PATH=./data/sentinel.db
+TZ=Asia/Tokyo
+```
+
+**注意:** `PORT` 環境変数はKoyebが自動的に設定するため、手動で設定する必要はありません。
+
+### 2. ヘルスチェックの設定
+
+Koyebのサービス設定で以下を指定：
+
+- **Health Check Path:** `/health`
+- **Health Check Port:** `8000` (または環境変数 `PORT` で指定したポート)
+- **Health Check Protocol:** `HTTP`
+- **Grace Period:** `60` 秒（Botの起動に時間がかかる場合があるため）
+
+### 3. ビルド設定
+
+- **Build Command:** (空欄でOK、依存関係は自動インストール)
+- **Run Command:** `npm start`
+
+### 4. その他の推奨設定
+
+- **Instance Type:** Nano または Micro（軽量なBotの場合）
+- **Regions:** 最も近いリージョンを選択（例: Frankfurt）
+- **Auto-deploy:** `main` ブランチへのプッシュで自動デプロイ
 
 ## ライセンス
 

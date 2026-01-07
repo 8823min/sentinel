@@ -1,6 +1,16 @@
 import { getDatabase } from '../config/database.js';
 
 /**
+ * JST（日本標準時）の年月日を取得 (YYYY-MM-DD)
+ * @param {Date} [date] - 日付オブジェクト（省略時は現在時刻）
+ * @returns {string} YYYY-MM-DD
+ */
+export function getJSTDateString(date = new Date()) {
+  const jstDate = new Date(date.getTime() + (9 * 60 * 60 * 1000));
+  return jstDate.toISOString().split('T')[0];
+}
+
+/**
  * Discord活動を記録（1日1回まで）
  * @param {string} userId - DiscordユーザーID
  * @param {Date} date - 活動日（デフォルト: 今日）
@@ -9,10 +19,8 @@ import { getDatabase } from '../config/database.js';
 export function recordDiscordActivity(userId, date = null) {
   const db = getDatabase();
 
-  // 日付を取得（YYYY-MM-DD形式）
-  const activityDate = date
-    ? date.toISOString().split('T')[0]
-    : new Date().toISOString().split('T')[0];
+  // 日付を取得（JSTのYYYY-MM-DD形式）
+  const activityDate = date ? getJSTDateString(date) : getJSTDateString();
 
   // 既に記録されているかチェック
   const existing = db.prepare(`
@@ -49,7 +57,7 @@ export function recordDiscordActivity(userId, date = null) {
  */
 export function getActivityByDate(userId, date) {
   const db = getDatabase();
-  const dateStr = date.toISOString().split('T')[0];
+  const dateStr = getJSTDateString(date);
 
   return db.prepare(`
     SELECT * FROM discord_activity
@@ -67,8 +75,8 @@ export function getActivityByDate(userId, date) {
 export function getDiscordActivityCount(userId, startDate, endDate) {
   const db = getDatabase();
 
-  const startDateStr = startDate.toISOString().split('T')[0];
-  const endDateStr = endDate.toISOString().split('T')[0];
+  const startDateStr = getJSTDateString(startDate);
+  const endDateStr = getJSTDateString(endDate);
 
   const result = db.prepare(`
     SELECT COUNT(*) as count 
@@ -102,7 +110,7 @@ export function getWeeklyDiscordActivity(userId, weekStartDate) {
  */
 export function hasTodayActivity(userId) {
   const db = getDatabase();
-  const today = new Date().toISOString().split('T')[0];
+  const today = getJSTDateString();
 
   const result = db.prepare(`
     SELECT has_activity 

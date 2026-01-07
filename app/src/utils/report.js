@@ -1,5 +1,5 @@
 import { getDatabase } from '../config/database.js';
-import { getActivityByDate } from './discordActivity.js';
+import { getActivityByDate, getJSTDateString } from './discordActivity.js';
 import { createInfoEmbed, createWarningEmbed } from './embed.js';
 import { ALLOWED_CHANNEL_NAMES } from './roles.js';
 
@@ -8,30 +8,36 @@ import { ALLOWED_CHANNEL_NAMES } from './roles.js';
  * @param {import('discord.js').Client} client 
  */
 export async function generateDailyReport(client) {
+    console.log('📊 日次レポートの生成を開始します...');
     const db = getDatabase();
 
-    // 日付の設定
+    // 日付の設定（すべてJST基準で計算）
+    const now = new Date();
+
     // レポート対象日（昨日）
-    const targetDate = new Date();
+    const targetDate = new Date(now);
     targetDate.setDate(targetDate.getDate() - 1);
+    const targetDateStr = getJSTDateString(targetDate);
 
     // 比較対象日（一昨日）
     const previousDate = new Date(targetDate);
     previousDate.setDate(previousDate.getDate() - 1);
 
-    // 対象ユーザーの選定
-    // 現在制限中のユーザー、または対象日に制限がかかっていたユーザー
-    // 簡易的に active なユーザーと、対象日に end_datetime があるユーザーを取得
-    const startOfTargetDate = new Date(targetDate);
-    startOfTargetDate.setHours(0, 0, 0, 0);
+    console.log(`対象日: ${targetDateStr}`);
 
+    // 対象ユーザーの選定
+    // 対象日に制限がかかっていた、または現在制限中のユーザーを取得
+    // SQLiteのDATETIMEは文字列比較になるため、JSTとの兼ね合いに注意
+    // ここでは status で絞り込む
     const activeUsers = db.prepare(`
     SELECT DISTINCT user_id FROM restrictions 
-    WHERE status = 'active'
-    OR (status = 'expired' AND end_datetime >= ?)
-  `).all(startOfTargetDate.toISOString());
+    WHERE status = 'active' OR status = 'expired'
+  `).all();
 
-    if (activeUsers.length === 0) return;
+    if (activeUsers.length === 0) {
+        console.log('レポート対象の制限ユーザーがいません。');
+        return;
+    }
 
     const reportFields = [];
     const warningFields = [];
@@ -40,7 +46,6 @@ export async function generateDailyReport(client) {
     for (const { user_id } of activeUsers) {
         // ユーザー名取得
         let displayName = `User ${user_id}`;
-        let userMention = `<@${user_id}>`;
         try {
             const user = await client.users.fetch(user_id);
             displayName = user.username;
@@ -55,7 +60,8 @@ export async function generateDailyReport(client) {
         const previousCount = previousActivity ? previousActivity.message_count : 0;
         const diff = targetCount - previousCount;
 
-        // レポートに追加
+        // 活動があった場合、または現在アクティブな制限ユーザーのみレポートに追加
+        // (全く活動がない、かつ制限も終わっているユーザーは除外)
         if (targetCount > 0 || previousCount > 0) {
             userCount++;
             const emoji = diff > 0 ? '📈' : (diff < 0 ? '📉' : '➡️');
@@ -67,8 +73,7 @@ export async function generateDailyReport(client) {
                 inline: true
             });
 
-            // 警告判定（増加しており、かつ昨日ある程度の活動（例えば5回以上）があった場合）
-            // 1回2回の微増で警告するのは厳しいかもしれないが、要望は「増えていたら警告」
+            // 警告判定
             if (diff > 0) {
                 warningFields.push({
                     name: `${displayName}`,
@@ -81,43 +86,66 @@ export async function generateDailyReport(client) {
                     db.prepare(`
             INSERT INTO warnings (user_id, warning_type, warning_date, details)
             VALUES (?, 'activity_increase', ?, ?)
-          `).run(user_id, targetDate.toISOString().split('T')[0], `投稿数増加: ${diff}回 (${previousCount} -> ${targetCount})`);
+          `).run(user_id, targetDateStr, `投稿数増加: ${diff}回 (${previousCount} -> ${targetCount})`);
                 } catch (error) {
-                    console.error('警告記録エラー:', error);
+                    console.error(`警告記録エラー (${user_id}):`, error);
                 }
             }
         }
     }
 
-    if (userCount === 0) return;
+    if (userCount === 0) {
+        console.log('集計対象の活動（メッセージ送信）がありませんでした。');
+        // 活動がない場合でも、レポートを送信するかどうかは運用次第
+        // ここでは、ユーザーが「何も送っていない」という安心感のため、空でも送信するか検討
+        // 要件的には「無いなら送信しない」でも良いが、テスト中は送信されると分かりやすい
+    }
 
-    // 全ギルドの「勉強」チャンネルに送信
-    // または、Sentinalが導入されているメインサーバーのみに送信する設計か
-    // 現状は全ギルドを回して送信する
+    // 全ギルドの適切なチャンネルに送信
     for (const guild of client.guilds.cache.values()) {
-        const channel = guild.channels.cache.find(c => c.name === ALLOWED_CHANNEL_NAMES[0] && c.type === 0);
-        if (channel) {
-            // 日次レポートEmbed
-            if (reportFields.length > 0) {
-                // Embedの制限（Field25個）を考慮すべきだが、プロトタイプなので一旦そのまま
-                // 必要なら分割ロジックを入れる
-                const reportEmbed = createInfoEmbed(
-                    `📊 日次活動レポート (${targetDate.toLocaleDateString()})`,
-                    '制限中ユーザーの投稿数集計結果です。'
-                );
-                reportEmbed.addFields(reportFields);
-                await channel.send({ embeds: [reportEmbed] });
-            }
+        // 1. 「勉強」チャンネルを探す
+        // 2. なければホワイトリストに入っているチャンネルの最初の1つ
+        // 3. なければ権限のある最初のテキストチャンネル
+        let channel = guild.channels.cache.find(c => c.name === ALLOWED_CHANNEL_NAMES[0] && c.type === 0);
 
-            // 警告Embed
-            if (warningFields.length > 0) {
-                const warningEmbed = createWarningEmbed(
-                    '⚠️ 活動量増加の警告',
-                    '以下のユーザーは前日に比べて投稿数が増加しています。'
-                );
-                warningEmbed.addFields(warningFields);
-                await channel.send({ embeds: [warningEmbed] });
+        if (!channel) {
+            channel = guild.channels.cache.find(c => c.type === 0 && c.permissionsFor(guild.members.me).has('SendMessages'));
+        }
+
+        if (channel) {
+            try {
+                // 日次レポートEmbed
+                if (reportFields.length > 0) {
+                    const reportEmbed = createInfoEmbed(
+                        `📊 日次活動レポート (${targetDateStr})`,
+                        '制限中ユーザーの投稿数集計結果です。'
+                    );
+                    reportEmbed.addFields(reportFields);
+                    await channel.send({ embeds: [reportEmbed] });
+                } else if (userCount === 0 && activeUsers.length > 0) {
+                    // 全員活動ゼロの場合の通知（任意）
+                    const emptyEmbed = createInfoEmbed(
+                        `📊 日次活動レポート (${targetDateStr})`,
+                        '対象ユーザーの昨日の活動はありませんでした。素晴らしい集中力です！'
+                    );
+                    await channel.send({ embeds: [emptyEmbed] });
+                }
+
+                // 警告Embed
+                if (warningFields.length > 0) {
+                    const warningEmbed = createWarningEmbed(
+                        '⚠️ 活動量増加の警告',
+                        '以下のユーザーは前日に比べて投稿数が増加しています。'
+                    );
+                    warningEmbed.addFields(warningFields);
+                    await channel.send({ embeds: [warningEmbed] });
+                }
+                console.log(`✅ [${guild.name}] にレポートを送信しました: #${channel.name}`);
+            } catch (error) {
+                console.error(`❌ [${guild.name}] へのレポート送信に失敗しました:`, error);
             }
+        } else {
+            console.warn(`⚠️ [${guild.name}] 送信先のチャンネルが見つかりませんでした。`);
         }
     }
 }

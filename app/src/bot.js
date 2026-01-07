@@ -7,10 +7,12 @@ import { stop } from './commands/stop.js';
 import { status } from './commands/status.js';
 import { clear } from './commands/clear.js';
 import { whitelist } from './commands/whitelist.js';
+import { settings } from './commands/settings.js';
 import { updateRestrictionStatuses } from './utils/restrictions.js';
 import { recordDiscordActivity } from './utils/discordActivity.js';
 import { generateDailyReport } from './utils/report.js';
 import { getOrCreateUser } from './utils/db.js';
+import { updateAllTwitterActivity } from './utils/twitter.js';
 
 export class SentinelBot {
     constructor() {
@@ -59,7 +61,8 @@ export class SentinelBot {
             if (!interaction.isChatInputCommand()) return;
             if (interaction.commandName !== 'study') return;
 
-            const subcommand = interaction.options.getSubcommand();
+            const subcommand = interaction.options.getSubcommand(false);
+            const group = interaction.options.getSubcommandGroup(false);
 
             try {
                 if (subcommand === 'setup') {
@@ -74,8 +77,12 @@ export class SentinelBot {
                     await clear.execute(interaction);
                 } else if (subcommand === 'whitelist') {
                     await whitelist.execute(interaction);
+                } else if (group === 'settings') {
+                    await settings.execute(interaction);
                 } else if (subcommand === 'report_trigger') {
                     await interaction.reply({ content: '📊 日次レポートの強制実行を開始します...', flags: MessageFlags.Ephemeral });
+                    // 集計直前に活動データを更新
+                    await updateAllTwitterActivity();
                     await generateDailyReport(this.client);
                     await interaction.followUp({ content: '✅ 日次レポートの実行が完了しました。ログを確認してください。', flags: MessageFlags.Ephemeral });
                 }
@@ -175,6 +182,19 @@ export class SentinelBot {
                     { name: 'status', description: '現在の状態', type: 1 },
                     { name: 'clear', description: 'データを消去', type: 1 },
                     { name: 'report_trigger', description: '【管理者用】日次レポートを強制的に実行します', type: 1 },
+                    {
+                        name: 'settings',
+                        description: '各種設定',
+                        type: 2, // Subcommand Group
+                        options: [
+                            {
+                                name: 'twitter',
+                                description: 'Twitter(X)のユーザー名を登録',
+                                type: 1,
+                                options: [{ name: 'username', description: 'Twitter ID (@以降)', type: 3, required: true }]
+                            }
+                        ]
+                    }
                 ],
             };
 
@@ -201,6 +221,8 @@ export class SentinelBot {
 
         cron.schedule('0 0 * * *', async () => {
             try {
+                // レポート送信前にTwitterデータを更新
+                await updateAllTwitterActivity();
                 await generateDailyReport(this.client);
             } catch (e) {
                 console.error('レポート生成エラー:', e);

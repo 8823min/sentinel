@@ -1,5 +1,6 @@
 import { getDatabase } from '../config/database.js';
 import { getActivityByDate, getJSTDateString } from './discordActivity.js';
+import { getTwitterActivityByDate } from './twitter.js';
 import { createInfoEmbed, createWarningEmbed } from './embed.js';
 import { ALLOWED_CHANNEL_NAMES } from './roles.js';
 
@@ -60,12 +61,23 @@ export async function generateDailyReport(client) {
         const previousCount = previousActivity ? previousActivity.message_count : 0;
         const diff = targetCount - previousCount;
 
+        // Twitter活動の取得
+        const targetTwitter = getTwitterActivityByDate(user_id, targetDate);
+        const prevTwitter = getTwitterActivityByDate(user_id, previousDate);
+        const twitterCount = targetTwitter ? targetTwitter.tweet_count : 0;
+        const prevTwitterCount = prevTwitter ? prevTwitter.tweet_count : 0;
+        const twitterDiff = twitterCount - prevTwitterCount;
+
         // 活動があった場合、または現在アクティブな制限ユーザーのみレポートに追加
-        // (全く活動がない、かつ制限も終わっているユーザーは除外)
-        if (targetCount > 0 || previousCount > 0) {
+        if (targetCount > 0 || previousCount > 0 || twitterCount > 0) {
             userCount++;
             const emoji = diff > 0 ? '📈' : (diff < 0 ? '📉' : '➡️');
-            const value = `昨日: **${targetCount}**回\n一昨日: ${previousCount}回\n差分: ${diff >= 0 ? '+' : ''}${diff}`;
+            const twitterEmoji = twitterDiff > 0 ? '🐦📈' : (twitterDiff < 0 ? '🐦📉' : '🐦➡️');
+
+            let value = `【Discord】\n昨日: **${targetCount}**回 / 一昨日: ${previousCount}回 (差: ${diff >= 0 ? '+' : ''}${diff})`;
+            if (targetTwitter || prevTwitter) {
+                value += `\n【Twitter】\n昨日: **${twitterCount}**回 / 一昨日: ${prevTwitterCount}回 (差: ${twitterDiff >= 0 ? '+' : ''}${twitterDiff})`;
+            }
 
             reportFields.push({
                 name: `${emoji} ${displayName}`,
@@ -101,8 +113,14 @@ export async function generateDailyReport(client) {
         // 要件的には「無いなら送信しない」でも良いが、テスト中は送信されると分かりやすい
     }
 
-    // 指定されたギルドのみに送信
-    const TARGET_GUILD_ID = '989882412660047942';
+    // 環境変数からターゲットギルドIDを取得
+    const TARGET_GUILD_ID = process.env.DISCORD_GUILD_ID;
+
+    if (!TARGET_GUILD_ID) {
+        console.warn('⚠️ DISCORD_GUILD_ID が設定されていないため、レポートの送信先を特定できません。');
+        return;
+    }
+
     const guild = client.guilds.cache.get(TARGET_GUILD_ID);
 
     if (!guild) {

@@ -15,12 +15,11 @@ export async function generateDailyReport(client) {
     // 日付の設定（すべてJST基準で計算）
     const now = new Date();
 
-    // レポート対象日（昨日）
+    // レポート対象日（本日）
     const targetDate = new Date(now);
-    targetDate.setDate(targetDate.getDate() - 1);
     const targetDateStr = getJSTDateString(targetDate);
 
-    // 比較対象日（一昨日）
+    // 比較対象日（昨日）
     const previousDate = new Date(targetDate);
     previousDate.setDate(previousDate.getDate() - 1);
 
@@ -74,9 +73,9 @@ export async function generateDailyReport(client) {
             const emoji = diff > 0 ? '📈' : (diff < 0 ? '📉' : '➡️');
             const twitterEmoji = twitterDiff > 0 ? '🐦📈' : (twitterDiff < 0 ? '🐦📉' : '🐦➡️');
 
-            let value = `【Discord】\n昨日: **${targetCount}**回 / 一昨日: ${previousCount}回 (差: ${diff >= 0 ? '+' : ''}${diff})`;
+            let value = `【Discord】\n本日: **${targetCount}**回 / 昨日: ${previousCount}回 (差: ${diff >= 0 ? '+' : ''}${diff})`;
             if (targetTwitter || prevTwitter) {
-                value += `\n【Twitter】\n昨日: **${twitterCount}**回 / 一昨日: ${prevTwitterCount}回 (差: ${twitterDiff >= 0 ? '+' : ''}${twitterDiff})`;
+                value += `\n【Twitter】\n本日: **${twitterCount}**回 / 昨日: ${prevTwitterCount}回 (差: ${twitterDiff >= 0 ? '+' : ''}${twitterDiff})`;
             }
 
             reportFields.push({
@@ -151,7 +150,7 @@ export async function generateDailyReport(client) {
                 // 全員活動ゼロの場合の通知
                 const emptyEmbed = createInfoEmbed(
                     `📊 日次活動レポート (${targetDateStr})`,
-                    '対象ユーザーの昨日の活動はありませんでした。素晴らしい集中力です！'
+                    '対象ユーザーの本日の活動はありませんでした。素晴らしい集中力です！'
                 );
                 await channel.send({ embeds: [emptyEmbed] });
             }

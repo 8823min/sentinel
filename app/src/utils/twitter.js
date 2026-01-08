@@ -1,5 +1,41 @@
+import { Scraper } from '@the-convocation/twitter-scraper';
 import { getDatabase } from '../config/database.js';
 import { getJSTDateString } from './discordActivity.js';
+
+let scraperInstance = null;
+
+/**
+ * Twitterスクレイパーのインスタンスを取得
+ */
+async function getScraper() {
+    if (scraperInstance) return scraperInstance;
+
+    const scraper = new Scraper();
+
+    // ログイン情報の取得
+    const username = process.env.TWITTER_USERNAME;
+    const password = process.env.TWITTER_PASSWORD;
+    const email = process.env.TWITTER_EMAIL;
+    const twoFactorSecret = process.env.TWITTER_2FA_SECRET;
+
+    if (username && password) {
+        try {
+            console.log(`[Twitter] アカウント @${username} でログインを試行します...`);
+            await scraper.login(username, password, email, twoFactorSecret);
+            console.log('[Twitter] ログインに成功しました。');
+            scraperInstance = scraper;
+        } catch (error) {
+            console.error('[Twitter] ログイン失敗:', error.message);
+            // 失敗してもインスタンスは返すが、取得できない可能性が高い
+            return scraper;
+        }
+    } else {
+        console.warn('[Twitter] Xのログイン情報が設定されていません。取得が制限される可能性があります。');
+        return scraper;
+    }
+
+    return scraperInstance;
+}
 
 /**
  * ユーザーのTwitter活動を記録
@@ -21,82 +57,65 @@ export function recordTwitterActivity(userId, tweetCount, date = new Date()) {
 }
 
 /**
- * Nitter経由でツイート数を取得（簡易実装）
+ * Xのタイムラインから本日のツイート数を取得
  * @param {string} username - Twitterユーザー名
+ * @param {Date} [targetDate] - 対象日（省略時は今日）
  * @returns {Promise<number|null>} ツイート数（取得失敗時はnull）
  */
-export async function fetchDailyTweetCount(username) {
-    // Nitterインスタンスのリスト（安定しているものを優先）
-    const instances = [
-        'https://nitter.poast.org',
-        'https://nitter.privacydev.net',
-        'https://nitter.no-logs.com'
-    ];
+export async function fetchDailyTweetCount(username, targetDate = new Date()) {
+    const targetDateStr = getJSTDateString(targetDate);
 
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const targetDateStr = getJSTDateString(yesterday);
+    try {
+        const scraper = await getScraper();
+        const query = `from:${username}`;
+        let count = 0;
 
-    // 注意: RSSからは「その日に何件投稿したか」の正確な数値を取得するのは限界がある
-    // (最新20件程度しか入っていないため)
-    // 本来はスクレイピングや専用APIが必要だが、要件に合わせた「Nitter経由」のプロトタイプ実装
+        // 指定ユーザーの最近のツイートを取得（上限20件程度で十分）
+        const tweets = scraper.getTweets(query, 50);
 
-    for (const instance of instances) {
-        try {
-            const response = await fetch(`${instance}/${username}/rss`, {
-                headers: { 'User-Agent': 'Mozilla/5.0' }
-            });
+        for await (const tweet of tweets) {
+            if (!tweet.timeParsed) continue;
 
-            if (!response.ok) continue;
+            const tweetDate = new Date(tweet.timeParsed);
+            const tweetDateStr = getJSTDateString(tweetDate);
 
-            const xml = await response.text();
-
-            // <pubDate>要素を抽出して日付をカウント
-            // 例: <pubDate>Tue, 07 Jan 2026 12:34:56 GMT</pubDate>
-            const items = xml.split('<item>');
-            let count = 0;
-
-            for (let i = 1; i < items.length; i++) {
-                const pubDateMatch = items[i].match(/<pubDate>(.*?)<\/pubDate>/);
-                if (pubDateMatch) {
-                    const pubDate = new Date(pubDateMatch[1]);
-                    if (getJSTDateString(pubDate) === targetDateStr) {
-                        count++;
-                    }
-                }
+            if (tweetDateStr === targetDateStr) {
+                count++;
+            } else if (tweetDate < targetDate) {
+                // 対象日より古いツイートが出てきたら終了
+                // (Twitterの検索結果は概ね降順)
+                break;
             }
-
-            console.log(`[Twitter] @${username} の ${targetDateStr} の活動数: ${count} (Instance: ${instance})`);
-            return count;
-        } catch (error) {
-            console.warn(`[Twitter] インスタンス ${instance} での取得失敗:`, error.message);
         }
-    }
 
-    return null;
+        console.log(`[Twitter] @${username} の ${targetDateStr} の活動数: ${count}`);
+        return count;
+    } catch (error) {
+        console.warn(`[Twitter] @${username} のデータ取得中にエラーが発生しました:`, error.message);
+        return null;
+    }
 }
 
 /**
  * 全ユーザーのTwitter活動を更新
+ * @param {Date} [targetDate] - 対象日（省略時は今日）
  */
-export async function updateAllTwitterActivity() {
+export async function updateAllTwitterActivity(targetDate = new Date()) {
     const db = getDatabase();
     const users = db.prepare('SELECT user_id, twitter_username FROM users WHERE twitter_username IS NOT NULL').all();
 
-    console.log(`[Twitter] ${users.length} 件のアカウント集計を開始します...`);
-
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
+    const targetDateStr = getJSTDateString(targetDate);
+    console.log(`[Twitter] ${users.length} 件のアカウント集計を開始します (${targetDateStr})...`);
 
     for (const user of users) {
-        const count = await fetchDailyTweetCount(user.twitter_username);
+        const count = await fetchDailyTweetCount(user.twitter_username, targetDate);
         if (count !== null) {
-            recordTwitterActivity(user.user_id, count, yesterday);
+            recordTwitterActivity(user.user_id, count, targetDate);
         } else {
             console.warn(`[Twitter] @${user.twitter_username} のデータ取得に失敗しました。`);
         }
-        // インスタンスへの負荷軽減のため少し待機
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // 負荷軽減のため少し待機
+        await new Promise(resolve => setTimeout(resolve, 3000));
     }
 }
 
